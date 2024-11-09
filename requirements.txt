@@ -1,5 +1,5 @@
 telethon == 1.37.0
 telegram == 0.0.1
-python-telegram-bot==20.1.1
-dotenv==0.20.0 
-requests==2.31.0 
+python-telegram-bot
+dotenv 
+requests
