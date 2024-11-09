@@ -9,6 +9,7 @@ from collections import defaultdict
 import logging
 import asyncio
 
+
 PORT = int(os.environ.get('PORT', '8080'))
 RENDER_URL = os.getenv('RENDER_URL')  
 
@@ -289,6 +290,9 @@ async def main():
     
     # Add your handlers here
     # app.add_handler(...)
+    
+    # Initialize the application first
+    await app.initialize()  # Add this line
     
     # Set webhook
     webhook_url = f"https://{RENDER_URL}.onrender.com/{BOT_TOKEN}"
