@@ -9,8 +9,8 @@ from collections import defaultdict
 import logging
 import asyncio
 
-
 PORT = int(os.environ.get('PORT', '8080'))
+RENDER_URL = os.getenv('RENDER_URL')  
 
 # Telegram bot configuration
 dotenv_path = find_dotenv()
@@ -287,14 +287,20 @@ async def stop(update, context):
 async def main():
     app = Application.builder().token(BOT_TOKEN).build()
     
-    # Add handlers here
+    # Add your handlers here
+    # app.add_handler(...)
     
-    await app.bot.set_webhook(url='YOUR_RENDER_URL' + BOT_TOKEN)
+    # Set webhook
+    webhook_url = f"https://{RENDER_URL}.onrender.com/{BOT_TOKEN}"
+    await app.bot.set_webhook(url=webhook_url)
+    
+    # Start webhook
     await app.start()
     await app.run_webhook(
-        listen='0.0.0.0',
+        listen="0.0.0.0",
         port=PORT,
-        webhook_url='YOUR_RENDER_URL' + BOT_TOKEN
+        webhook_url=webhook_url,
+        drop_pending_updates=True
     )
 
 if __name__ == '__main__':
