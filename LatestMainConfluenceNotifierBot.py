@@ -9,6 +9,9 @@ from collections import defaultdict
 import logging
 import asyncio
 
+
+PORT = int(os.environ.get('PORT', '8080'))
+
 # Telegram bot configuration
 dotenv_path = find_dotenv()
 load_dotenv(dotenv_path)
@@ -281,21 +284,18 @@ async def stop(update, context):
             text="No monitoring session found for this chat."
         )
 
-def main():
-    """Start the bot"""
-    application = Application.builder().token(BOT_TOKEN).build()
-    application.bot_data = {}
-
-    # Add command handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("stop", stop))
-
-    # Start the bot
-    application.run_polling()
-
-if __name__ == "__main__":
-    logging.basicConfig(
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        level=logging.INFO
+async def main():
+    app = Application.builder().token(BOT_TOKEN).build()
+    
+    # Add handlers here
+    
+    await app.bot.set_webhook(url='YOUR_RENDER_URL' + BOT_TOKEN)
+    await app.start()
+    await app.run_webhook(
+        listen='0.0.0.0',
+        port=PORT,
+        webhook_url='YOUR_RENDER_URL' + BOT_TOKEN
     )
-    main()
+
+if __name__ == '__main__':
+    asyncio.run(main())
