@@ -8,15 +8,28 @@ import re
 from collections import defaultdict
 import logging
 import asyncio
+import sys
+from contextlib import suppress
+from httpx import Timeout
+import logging
+import nest_asyncio
+nest_asyncio.apply()
 
-# Telegram bot configuration
-dotenv_path = find_dotenv()
-load_dotenv(dotenv_path)
+# Configure logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 
-# Telethon client configuration
+# Environment variables configuration
+# For local development, use .env file
+if os.path.exists('.env'):
+    load_dotenv()
+# For production (Render), use environment variables directly
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
+PORT = int(os.getenv("PORT", 8080))
 
 # Create Telethon client
 telethon_client = TelegramClient('test', API_ID, API_HASH)
@@ -72,9 +85,7 @@ def extract_market_cap(text):
 
 def has_pump_keywords(text):
     """Check if the message contains any pump-related keywords with case sensitivity for PUMP"""
-    # Check for case-sensitive "PUMP" or "Pump"
     pump_match = any(pump_word in text for pump_word in ['PUMP', 'Pump'])
-    # Check for case-insensitive "pumpfun" or "raydium"
     other_keywords = any(keyword in text.lower() for keyword in ['pumpfun', 'raydium'])
     return pump_match or other_keywords
 
@@ -101,13 +112,10 @@ async def is_valid_buy_message(text):
 
 def extract_pump_type(text):
     """Extract pump type from the message with case sensitivity for PUMP"""
-    # Check for pumpfun first (case insensitive)
     if 'pumpfun' in text.lower():
         return 'PUMPFUN'
-    # Check for raydium (case insensitive)
     elif 'raydium' in text.lower():
         return 'RAYDIUM'
-    # Check for PUMP or Pump (case sensitive)
     elif 'PUMP' in text or 'Pump' in text:
         return 'PUMPFUN'
     return None
@@ -281,21 +289,28 @@ async def stop(update, context):
             text="No monitoring session found for this chat."
         )
 
-def main():
-    """Start the bot"""
+async def main():
+    """Initialize and start the bot"""
+    # Create the Application
     application = Application.builder().token(BOT_TOKEN).build()
-    application.bot_data = {}
-
+    
     # Add command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("stop", stop))
-
-    # Start the bot
-    application.run_polling()
+    
+    # Start the bot in polling mode
+    await application.initialize()
+    await application.start()
+    
+    logging.info("Bot started successfully")
+    
+    # Keep the bot running
+    try:
+        await application.run_polling()
+    except Exception as e:
+        logging.error(f"Error in main loop: {e}")
+        await application.stop()
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        level=logging.INFO
-    )
-    main()
+    # Run the bot
+    asyncio.run(main())
