@@ -15,21 +15,19 @@ import logging
 import nest_asyncio
 nest_asyncio.apply()
 
-# Configure logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+PORT = int(os.getenv("PORT", 8443))  # Render will provide the PORT environment variable
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")  
 
-# Environment variables configuration
-# For local development, use .env file
-if os.path.exists('.env'):
-    load_dotenv()
-# For production (Render), use environment variables directly
+
+
+# Telegram bot configuration
+dotenv_path = find_dotenv()
+load_dotenv(dotenv_path)
+
+# Telethon client configuration
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
-PORT = int(os.getenv("PORT", 8080))
 
 # Create Telethon client
 telethon_client = TelegramClient('test', API_ID, API_HASH)
@@ -85,7 +83,9 @@ def extract_market_cap(text):
 
 def has_pump_keywords(text):
     """Check if the message contains any pump-related keywords with case sensitivity for PUMP"""
+    # Check for case-sensitive "PUMP" or "Pump"
     pump_match = any(pump_word in text for pump_word in ['PUMP', 'Pump'])
+    # Check for case-insensitive "pumpfun" or "raydium"
     other_keywords = any(keyword in text.lower() for keyword in ['pumpfun', 'raydium'])
     return pump_match or other_keywords
 
@@ -112,10 +112,13 @@ async def is_valid_buy_message(text):
 
 def extract_pump_type(text):
     """Extract pump type from the message with case sensitivity for PUMP"""
+    # Check for pumpfun first (case insensitive)
     if 'pumpfun' in text.lower():
         return 'PUMPFUN'
+    # Check for raydium (case insensitive)
     elif 'raydium' in text.lower():
         return 'RAYDIUM'
+    # Check for PUMP or Pump (case sensitive)
     elif 'PUMP' in text or 'Pump' in text:
         return 'PUMPFUN'
     return None
@@ -289,28 +292,74 @@ async def stop(update, context):
             text="No monitoring session found for this chat."
         )
 
+
+
+
+# [Previous imports and configurations remain the same...]
+
+
+
+
+# Adjusted main function
 async def main():
-    """Initialize and start the bot"""
-    # Create the Application
+    """Initialize the bot with webhook for Render deployment"""
+    # Initialize Application instance
     application = Application.builder().token(BOT_TOKEN).build()
-    
+    application.bot_data["application"] = application
+
     # Add command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("stop", stop))
+
+    # Set up webhook using Render's external URL
+    webhook_url = f"{RENDER_EXTERNAL_URL}/{BOT_TOKEN}"
     
-    # Start the bot in polling mode
-    await application.initialize()
-    await application.start()
-    
-    logging.info("Bot started successfully")
-    
-    # Keep the bot running
+    logging.info("Starting bot initialization...")
     try:
-        await application.run_polling()
+        await application.bot.set_webhook(
+            url=webhook_url,
+            allowed_updates=["message", "callback_query"]
+        )
+        logging.info(f"Webhook set successfully to {webhook_url}")
+        
+        # Initialize the application
+        await application.initialize()
+        return application
+
     except Exception as e:
-        logging.error(f"Error in main loop: {e}")
-        await application.stop()
+        logging.error(f"Error in webhook setup: {e}")
+        raise
+
+def run_bot():
+    """Runner function for the bot"""
+    # Configure logging
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
+
+    try:
+        # Initialize the event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        # Initialize the application
+        application = loop.run_until_complete(main())
+        
+        # Run the webhook server
+        application.run_webhook(
+            listen="0.0.0.0",  # Listen on all available interfaces
+            port=PORT,  # Use the PORT provided by Render
+            url_path=BOT_TOKEN,
+            webhook_url=f"{RENDER_EXTERNAL_URL}/{BOT_TOKEN}",
+            drop_pending_updates=True
+        )
+
+    except KeyboardInterrupt:
+        logging.info("Bot stopped by user")
+    except Exception as e:
+        logging.error(f"Fatal error: {e}")
+        raise
 
 if __name__ == "__main__":
-    # Run the bot
-    asyncio.run(main())
+    run_bot()
