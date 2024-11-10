@@ -18,8 +18,6 @@ nest_asyncio.apply()
 PORT = int(os.getenv("PORT", 8443))  # Render will provide the PORT environment variable
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")  
 
-
-
 # Telegram bot configuration
 dotenv_path = find_dotenv()
 load_dotenv(dotenv_path)
@@ -48,6 +46,8 @@ class MonitoringSession:
         self.monitoring_task = None
         self.token_pump_types = {}
         self.token_market_caps = {}
+        self.token_sol_amounts = {}
+        self.token_timestamps = {}  # New: Track timestamps of trades
         self.start_time = None
         self.round_start_time = None
 
@@ -57,35 +57,51 @@ async def check_authorization(update):
     user_username = update.effective_user.username
     chat_username = update.effective_chat.username
     
-    logging.info(f"Auth attempt - Chat type: {update.effective_chat.type}")
-    logging.info(f"User username: {user_username}")
-    logging.info(f"Chat username: {chat_username}")
-    logging.info(f"Chat username (lowercase): {chat_username.lower() if chat_username else None}")
-    logging.info(f"Authorized groups: {AUTHORIZED_GROUPS}")
-    
     if update.effective_chat.type == 'private':
-        is_authorized = user_username and user_username.lower() in {user.lower() for user in AUTHORIZED_USERS}
-        logging.info(f"Private chat authorization result: {is_authorized}")
-        return is_authorized
+        return user_username and user_username.lower() in {user.lower() for user in AUTHORIZED_USERS}
     
-    is_authorized = chat_username and chat_username.lower() in {group.lower() for group in AUTHORIZED_GROUPS}
-    logging.info(f"Group chat authorization result: {is_authorized}")
-    return is_authorized
+    return chat_username and chat_username.lower() in {group.lower() for group in AUTHORIZED_GROUPS}
 
 def extract_market_cap(text):
-    """Extract market cap information from the message"""
-    mc_pattern = r'(?:MC|MCP):\s*\$?\s*([\d.]+)K\$?'
-    match = re.search(mc_pattern, text)
+    """Extract market cap value and unit from the message"""
+    mc_pattern = r'(?:(?:MC|MCP):\s*\$?\s*([\d.]+)\s*([KkMm])?|\$?\s*([\d.]+)\s*([KkMm])?\s*(?=(?:MC|MCP)))'
+    match = re.search(mc_pattern, text, re.IGNORECASE)
+    
     if match:
-        value = match.group(1)
-        return f"MC: ${value}K"
+        value = match.group(1) or match.group(3)
+        unit = match.group(2) or match.group(4)
+        
+        try:
+            value = float(value)
+            # Standardize unit to uppercase
+            if unit:
+                unit = unit.upper()
+            else:
+                unit = 'K'  # Default to K if no unit specified
+            return {'value': value, 'unit': unit}
+        except ValueError:
+            return None
+    return None
+
+def extract_sol_amount(text):
+    """Extract the last number before 'SOL' in the text"""
+    sol_pos = text.find('SOL')
+    if sol_pos == -1:
+        return None
+        
+    text_before_sol = text[:sol_pos]
+    numbers = re.findall(r'[-+]?\d*\.\d+|\d+', text_before_sol)
+    
+    if numbers:
+        try:
+            return float(numbers[-1])
+        except ValueError:
+            return None
     return None
 
 def has_pump_keywords(text):
     """Check if the message contains any pump-related keywords with case sensitivity for PUMP"""
-    # Check for case-sensitive "PUMP" or "Pump"
     pump_match = any(pump_word in text for pump_word in ['PUMP', 'Pump'])
-    # Check for case-insensitive "pumpfun" or "raydium"
     other_keywords = any(keyword in text.lower() for keyword in ['pumpfun', 'raydium'])
     return pump_match or other_keywords
 
@@ -112,16 +128,24 @@ async def is_valid_buy_message(text):
 
 def extract_pump_type(text):
     """Extract pump type from the message with case sensitivity for PUMP"""
-    # Check for pumpfun first (case insensitive)
     if 'pumpfun' in text.lower():
         return 'PUMPFUN'
-    # Check for raydium (case insensitive)
     elif 'raydium' in text.lower():
         return 'RAYDIUM'
-    # Check for PUMP or Pump (case sensitive)
     elif 'PUMP' in text or 'Pump' in text:
         return 'PUMPFUN'
     return None
+
+def get_token_address(text, chat_link):
+    """Extract token address based on the chat source"""
+    solana_addresses = re.findall(r'[0-9A-HJ-NP-Za-km-z]{32,44}', text)
+    if not solana_addresses:
+        return None
+        
+    if 'Godeye_wallet_trackerBot' in chat_link:
+        return solana_addresses[0]
+    
+    return solana_addresses[-1]
 
 async def scrap_message(chat, session, limit=50):
     """Scrape messages and track token purchases"""
@@ -136,25 +160,31 @@ async def scrap_message(chat, session, limit=50):
                 trader_pattern = r'(?:TRADER|Trader|trader)\d+'
                 trader_match = re.search(trader_pattern, text)
 
-                solana_addresses = re.findall(r'[0-9A-HJ-NP-Za-km-z]{32,44}', text)
+                token_address = get_token_address(text, chat)
 
-                if trader_match and solana_addresses:
-                    last_solana_address = solana_addresses[-1]
+                if trader_match and token_address:
                     trader = trader_match.group()
                     
-                    if last_solana_address != EXCLUDED_TOKEN:
+                    if token_address != EXCLUDED_TOKEN:
                         pump_type = extract_pump_type(text)
                         market_cap = extract_market_cap(text)
+                        sol_amount = extract_sol_amount(text)
+                        timestamp = message.date.timestamp()
                         
-                        if last_solana_address not in session.multi_trader_tokens:
-                            session.multi_trader_tokens[last_solana_address] = set()
-                            session.token_market_caps[last_solana_address] = {}
+                        if token_address not in session.multi_trader_tokens:
+                            session.multi_trader_tokens[token_address] = set()
+                            session.token_market_caps[token_address] = {}
+                            session.token_sol_amounts[token_address] = {}
+                            session.token_timestamps[token_address] = {}
                             if pump_type:
-                                session.token_pump_types[last_solana_address] = pump_type
+                                session.token_pump_types[token_address] = pump_type
                         
-                        session.multi_trader_tokens[last_solana_address].add(trader)
-                        if market_cap:
-                            session.token_market_caps[last_solana_address][trader] = market_cap
+                        session.multi_trader_tokens[token_address].add(trader)
+                        if market_cap is not None:
+                            session.token_market_caps[token_address][trader] = market_cap
+                        if sol_amount is not None:
+                            session.token_sol_amounts[token_address][trader] = sol_amount
+                        session.token_timestamps[token_address][trader] = timestamp
 
 async def monitor_channels(context, session):
     """Monitor channels for a specific chat session"""
@@ -162,7 +192,8 @@ async def monitor_channels(context, session):
         'https://t.me/ray_silver_bot': 150,
         'https://t.me/handi_cat_bot': 300,
         'https://t.me/Wallet_tracker_solana_spybot': 75,
-        'https://t.me/CashCash_alert_bot': 75,
+        'https://t.me/Godeye_wallet_trackerBot': 75,
+        
         'https://t.me/GMGN_alert_bot': 150,
         'https://t.me/Solbix_bot': 300
     }
@@ -177,14 +208,24 @@ async def monitor_channels(context, session):
         current_messages = []
         for address, traders in session.multi_trader_tokens.items():
             if len(traders) >= 2:
-                trader_list = sorted(list(traders))
+                latest_trader = max(traders, key=lambda t: session.token_timestamps[address].get(t, 0))
                 pump_type = session.token_pump_types.get(address, "Unknown")
+                sol_amount = session.token_sol_amounts[address].get(latest_trader)
+                market_cap = session.token_market_caps[address].get(latest_trader)
                 
-                message = f"{len(trader_list)} traders bought {address}:\n\n"
-                for trader in trader_list:
-                    market_cap = session.token_market_caps.get(address, {}).get(trader, "")
-                    mc_info = f" - {market_cap}" if market_cap else ""
-                    message += f"{trader} - {pump_type}{mc_info}\n"
+                message = (
+                    f"{len(traders)} traders bought {address}:\n"
+                    f"last trader bought"
+                )
+                
+                if sol_amount is not None:
+                    message += f" {sol_amount:.1f} SOL"
+                
+                message += f" on {pump_type}"
+                
+                if market_cap is not None:
+                    message += f" at MC: ${market_cap['value']:.2f}{market_cap['unit']}"
+                
                 current_messages.append(message)
 
         new_messages = [msg for msg in current_messages if msg not in session.previous_messages]
@@ -202,7 +243,7 @@ async def monitor_channels(context, session):
             for message in new_messages:
                 await context.bot.send_message(
                     chat_id=session.chat_id,
-                    text=message + timing_message
+                    text=message
                 )
             session.previous_messages = current_messages.copy()
         else:
@@ -211,7 +252,7 @@ async def monitor_channels(context, session):
                 text="No new multiple-trader tokens found" + timing_message
             )
 
-        await asyncio.sleep(10)
+        await asyncio.sleep(1)
         if session.is_monitoring:
             await context.bot.send_message(
                 chat_id=session.chat_id,
@@ -277,6 +318,8 @@ async def stop(update, context):
             session.previous_messages.clear()
             session.token_pump_types.clear()
             session.token_market_caps.clear()
+            session.token_sol_amounts.clear()
+            session.token_timestamps.clear()
             await context.bot.send_message(
                 chat_id=chat_id,
                 text=f"Monitoring stopped for this chat.\nTotal running time: {final_duration:.2f} seconds"
@@ -292,15 +335,6 @@ async def stop(update, context):
             text="No monitoring session found for this chat."
         )
 
-
-
-
-# [Previous imports and configurations remain the same...]
-
-
-
-
-# Adjusted main function
 async def main():
     """Initialize the bot with webhook for Render deployment"""
     # Initialize Application instance
