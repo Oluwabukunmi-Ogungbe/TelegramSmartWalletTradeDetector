@@ -30,6 +30,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 
+
 # Create Telethon client
 telethon_client = TelegramClient('test', API_ID, API_HASH)
 
@@ -204,9 +205,18 @@ async def monitor_channels(context, session):
     }
 
     while session.is_monitoring:
+        await context.bot.send_message(
+                    chat_id=session.chat_id,
+                    text= "sessiom is being monitored"
+                )
         session.round_start_time = time.time()
         
         async with telethon_client:
+            await context.bot.send_message(
+                    chat_id=session.chat_id,
+                    text= "sessiom is being monitored"
+                )
+            
             for chat_link, limit in chat_limits.items():
                 await scrap_message(chat_link, session, limit)
 
