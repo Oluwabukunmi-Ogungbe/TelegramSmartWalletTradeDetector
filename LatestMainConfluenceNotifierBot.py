@@ -394,22 +394,22 @@ async def main():
     """Initialize the bot with webhook for Render deployment"""
     # Initialize Application instance
     async def main():
-    application = Application.builder().token(BOT_TOKEN).build()
-    application.bot_data["application"] = application
+        application = Application.builder().token(BOT_TOKEN).build()
+        application.bot_data["application"] = application
 
     # Add command handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("stop", stop))
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("stop", stop))
 
     # Only set webhook if RENDER_EXTERNAL_URL is provided
-    if RENDER_EXTERNAL_URL:
-        webhook_url = f"{RENDER_EXTERNAL_URL}/{BOT_TOKEN}"
-        await application.bot.set_webhook(
-            url=webhook_url,
-            allowed_updates=["message", "callback_query"],
-            drop_pending_updates=True
+        if RENDER_EXTERNAL_URL:
+            webhook_url = f"{RENDER_EXTERNAL_URL}/{BOT_TOKEN}"
+            await application.bot.set_webhook(
+                url=webhook_url,
+                allowed_updates=["message", "callback_query"],
+                drop_pending_updates=True
         )
-        logging.info(f"Webhook set successfully to {webhook_url}")
+            logging.info(f"Webhook set successfully to {webhook_url}")
     
     return application
 
