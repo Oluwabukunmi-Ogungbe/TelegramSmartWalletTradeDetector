@@ -151,6 +151,7 @@ def get_token_address(text, chat_link):
     return solana_addresses[-1]
 
 async def scrap_message(chat, session, limit=50):
+    logging.info("scrape started")
     """Scrape messages and track token purchases"""
     async for message in telethon_client.iter_messages(chat, limit=limit):
         if message.text:
@@ -188,6 +189,7 @@ async def scrap_message(chat, session, limit=50):
                         if sol_amount is not None:
                             session.token_sol_amounts[token_address][trader] = sol_amount
                         session.token_timestamps[token_address][trader] = timestamp
+    logging.info("scrap ended")
 
 async def monitor_channels(context, session):
     """Monitor channels for a specific chat session"""
@@ -382,6 +384,7 @@ def run_bot():
         
         # Initialize the application
         application = loop.run_until_complete(main())
+        logging.info("webhookrun abt to start")
         
         # Run the webhook server
         application.run_webhook(
