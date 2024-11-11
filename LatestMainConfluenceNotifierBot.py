@@ -204,9 +204,18 @@ async def monitor_channels(context, session):
     }
 
     while session.is_monitoring:
+        await context.bot.send_message(
+                    chat_id=session.chat_id,
+                    text= "sessiom is being monitored"
+                )
         session.round_start_time = time.time()
         
         async with telethon_client:
+            await context.bot.send_message(
+                    chat_id=session.chat_id,
+                    text= "monitoring strated"
+                )
+            
             for chat_link, limit in chat_limits.items():
                 await scrap_message(chat_link, session, limit)
 
