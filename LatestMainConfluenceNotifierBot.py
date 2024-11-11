@@ -341,6 +341,9 @@ async def stop(update, context):
         )
 
 async def main():
+
+    await telethon_client.start()  # Add this line to start the Telethon client
+    logging.info("Telethon client started")
     """Initialize the bot with webhook for Render deployment"""
     # Initialize Application instance
     application = Application.builder().token(BOT_TOKEN).build()
@@ -370,6 +373,8 @@ async def main():
         raise
 
 def run_bot():
+
+    
     """Runner function for the bot"""
     # Configure logging
     logging.basicConfig(
@@ -395,11 +400,14 @@ def run_bot():
             drop_pending_updates=True
         )
 
+    
+    
     except KeyboardInterrupt:
         logging.info("Bot stopped by user")
     except Exception as e:
         logging.error(f"Fatal error: {e}")
         raise
+    logging.info("webhook started")
 
 if __name__ == "__main__":
     run_bot()
