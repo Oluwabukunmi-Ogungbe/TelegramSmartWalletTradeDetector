@@ -13,7 +13,10 @@ from contextlib import suppress
 from httpx import Timeout
 import logging
 import nest_asyncio
+from keep_alive import keep_alive
 nest_asyncio.apply()
+
+keep_alive()
 
 PORT = int(os.getenv("PORT", 8443))  # Render will provide the PORT environment variable
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")  
