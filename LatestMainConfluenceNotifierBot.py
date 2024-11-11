@@ -13,32 +13,61 @@ from contextlib import suppress
 from httpx import Timeout
 import logging
 import nest_asyncio
-from keep_alive import keep_alive
+from threading import Thread
+from flask import Flask
+
+# Initialize Flask app for keep_alive
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "I'm alive"
+
+def run_flask():
+    port = int(os.getenv("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.daemon = True  # Set as daemon thread
+    t.start()
+
+# Apply nest_asyncio to allow nested event loops
 nest_asyncio.apply()
 
+# Initialize keep_alive
 keep_alive()
 
-PORT = int(os.getenv("PORT", 8443))  # Render will provide the PORT environment variable
-RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")  
+# Configuration
+PORT = int(os.getenv("PORT", 10000))
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")
 
-# Telegram bot configuration
+# Load environment variables
 dotenv_path = find_dotenv()
 load_dotenv(dotenv_path)
 
-# Telethon client configuration
+# Telegram configuration
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 
-# Create Telethon client
+# Initialize Telethon client
 telethon_client = TelegramClient('test', API_ID, API_HASH)
 
-# Excluded token address
+# Constants
 EXCLUDED_TOKEN = 'So11111111111111111111111111111112'
-
-# Authorized users and groups (store without @ symbol)
 AUTHORIZED_USERS = {'orehub1378', 'busiiiiii', 'jeremi1234'}
 AUTHORIZED_GROUPS = {'THETRACKOORS'}
+
+# Chat configuration
+CHAT_LIMITS = {
+    'https://t.me/ray_silver_bot': 150,
+    'https://t.me/handi_cat_bot': 300,
+    'https://t.me/Wallet_tracker_solana_spybot': 75,
+    'https://t.me/Godeye_wallet_trackerBot': 75,
+    'https://t.me/GMGN_alert_bot': 150,
+    'https://t.me/Solbix_bot': 300
+}
 
 class MonitoringSession:
     def __init__(self, chat_id):
@@ -50,9 +79,24 @@ class MonitoringSession:
         self.token_pump_types = {}
         self.token_market_caps = {}
         self.token_sol_amounts = {}
-        self.token_timestamps = {}  # New: Track timestamps of trades
+        self.token_timestamps = {}
         self.start_time = None
         self.round_start_time = None
+        self.error_count = 0
+        self.last_error_time = None
+
+    async def reset(self):
+        self.is_monitoring = False
+        if self.monitoring_task:
+            self.monitoring_task.cancel()
+        self.multi_trader_tokens.clear()
+        self.previous_messages.clear()
+        self.token_pump_types.clear()
+        self.token_market_caps.clear()
+        self.token_sol_amounts.clear()
+        self.token_timestamps.clear()
+        self.error_count = 0
+        self.last_error_time = None
 
 async def check_authorization(update):
     """Check if the user/group is authorized to use the bot"""
@@ -76,11 +120,7 @@ def extract_market_cap(text):
         
         try:
             value = float(value)
-            # Standardize unit to uppercase
-            if unit:
-                unit = unit.upper()
-            else:
-                unit = 'K'  # Default to K if no unit specified
+            unit = unit.upper() if unit else 'K'
             return {'value': value, 'unit': unit}
         except ValueError:
             return None
@@ -103,7 +143,7 @@ def extract_sol_amount(text):
     return None
 
 def has_pump_keywords(text):
-    """Check if the message contains any pump-related keywords with case sensitivity for PUMP"""
+    """Check if the message contains pump-related keywords"""
     pump_match = any(pump_word in text for pump_word in ['PUMP', 'Pump'])
     other_keywords = any(keyword in text.lower() for keyword in ['pumpfun', 'raydium'])
     return pump_match or other_keywords
@@ -130,7 +170,7 @@ async def is_valid_buy_message(text):
     return False
 
 def extract_pump_type(text):
-    """Extract pump type from the message with case sensitivity for PUMP"""
+    """Extract pump type from the message"""
     if 'pumpfun' in text.lower():
         return 'PUMPFUN'
     elif 'raydium' in text.lower():
@@ -151,24 +191,26 @@ def get_token_address(text, chat_link):
     return solana_addresses[-1]
 
 async def scrap_message(chat, session, limit=50):
-    """Scrape messages and track token purchases"""
-    async for message in telethon_client.iter_messages(chat, limit=limit):
-        if message.text:
-            text = message.text
+    """Scrape messages and track token purchases with error handling"""
+    try:
+        async for message in telethon_client.iter_messages(chat, limit=limit):
+            try:
+                if not message.text:
+                    continue
 
-            if not has_pump_keywords(text):
-                continue
+                text = message.text
 
-            if await is_valid_buy_message(text):
-                trader_pattern = r'(?:TRADER|Trader|trader)\d+'
-                trader_match = re.search(trader_pattern, text)
+                if not has_pump_keywords(text):
+                    continue
 
-                token_address = get_token_address(text, chat)
+                if await is_valid_buy_message(text):
+                    trader_pattern = r'(?:TRADER|Trader|trader)\d+'
+                    trader_match = re.search(trader_pattern, text)
 
-                if trader_match and token_address:
-                    trader = trader_match.group()
-                    
-                    if token_address != EXCLUDED_TOKEN:
+                    token_address = get_token_address(text, chat)
+
+                    if trader_match and token_address and token_address != EXCLUDED_TOKEN:
+                        trader = trader_match.group()
                         pump_type = extract_pump_type(text)
                         market_cap = extract_market_cap(text)
                         sol_amount = extract_sol_amount(text)
@@ -189,88 +231,105 @@ async def scrap_message(chat, session, limit=50):
                             session.token_sol_amounts[token_address][trader] = sol_amount
                         session.token_timestamps[token_address][trader] = timestamp
 
+            except Exception as e:
+                logging.error(f"Error processing message in {chat}: {e}")
+                continue
+
+    except Exception as e:
+        logging.error(f"Error scraping messages from {chat}: {e}")
+        raise
+
 async def monitor_channels(context, session):
-    """Monitor channels for a specific chat session"""
-    chat_limits = {
-        'https://t.me/ray_silver_bot': 150,
-        'https://t.me/handi_cat_bot': 300,
-        'https://t.me/Wallet_tracker_solana_spybot': 75,
-        'https://t.me/Godeye_wallet_trackerBot': 75,
-        
-        'https://t.me/GMGN_alert_bot': 150,
-        'https://t.me/Solbix_bot': 300
-    }
-
-    while session.is_monitoring:
-        session.round_start_time = time.time()
-        
-        async with telethon_client:
-            for chat_link, limit in chat_limits.items():
-                await scrap_message(chat_link, session, limit)
-
-        current_messages = []
-        for address, traders in session.multi_trader_tokens.items():
-            if len(traders) >= 2:
-                latest_trader = max(traders, key=lambda t: session.token_timestamps[address].get(t, 0))
-                pump_type = session.token_pump_types.get(address, "Unknown")
-                sol_amount = session.token_sol_amounts[address].get(latest_trader)
-                market_cap = session.token_market_caps[address].get(latest_trader)
+    """Monitor channels with enhanced error handling and monitoring"""
+    try:
+        while session.is_monitoring:
+            try:
+                session.round_start_time = time.time()
                 
-                message = (
-                    f"{len(traders)} traders bought {address}:\n"
-                    f"last trader bought"
+                async with telethon_client:
+                    for chat_link, limit in CHAT_LIMITS.items():
+                        try:
+                            await scrap_message(chat_link, session, limit)
+                        except Exception as e:
+                            logging.error(f"Error scraping {chat_link}: {e}")
+                            session.error_count += 1
+                            session.last_error_time = time.time()
+                            continue
+
+                current_messages = []
+                for address, traders in session.multi_trader_tokens.items():
+                    if len(traders) >= 2:
+                        latest_trader = max(traders, key=lambda t: session.token_timestamps[address].get(t, 0))
+                        pump_type = session.token_pump_types.get(address, "Unknown")
+                        sol_amount = session.token_sol_amounts[address].get(latest_trader)
+                        market_cap = session.token_market_caps[address].get(latest_trader)
+                        
+                        message = (
+                            f"{len(traders)} traders bought {address}:\n"
+                            f"last trader bought"
+                        )
+                        
+                        if sol_amount is not None:
+                            message += f" {sol_amount:.1f} SOL"
+                        
+                        message += f" on {pump_type}"
+                        
+                        if market_cap is not None:
+                            message += f" at MC: ${market_cap['value']:.2f}{market_cap['unit']}"
+                        
+                        current_messages.append(message)
+
+                new_messages = [msg for msg in current_messages if msg not in session.previous_messages]
+
+                round_duration = time.time() - session.round_start_time
+                total_duration = time.time() - session.start_time
+                
+                status_message = (
+                    f"\nMonitoring Status:\n"
+                    f"Round Duration: {round_duration:.2f} seconds\n"
+                    f"Total Running Time: {total_duration:.2f} seconds\n"
+                    f"Error Count: {session.error_count}"
                 )
-                
-                if sol_amount is not None:
-                    message += f" {sol_amount:.1f} SOL"
-                
-                message += f" on {pump_type}"
-                
-                if market_cap is not None:
-                    message += f" at MC: ${market_cap['value']:.2f}{market_cap['unit']}"
-                
-                current_messages.append(message)
 
-        new_messages = [msg for msg in current_messages if msg not in session.previous_messages]
+                if new_messages:
+                    for message in new_messages:
+                        await context.bot.send_message(
+                            chat_id=session.chat_id,
+                            text=message
+                        )
+                    session.previous_messages = current_messages.copy()
+                else:
+                    await context.bot.send_message(
+                        chat_id=session.chat_id,
+                        text="No new multiple-trader tokens found" + status_message
+                    )
 
-        round_duration = time.time() - session.round_start_time
-        total_duration = time.time() - session.start_time
-        
-        timing_message = (
-            f"\nRound Timing:\n"
-            f"Round Duration: {round_duration:.2f} seconds\n"
-            f"Total Running Time: {total_duration:.2f} seconds"
-        )
+                # Add delay between rounds
+                await asyncio.sleep(1)
+                
+                if session.is_monitoring:
+                    await context.bot.send_message(
+                        chat_id=session.chat_id,
+                        text=".....\n ROUND RESTARTED \n ....."
+                    )
+                
+            except Exception as e:
+                logging.error(f"Error in monitoring loop: {e}")
+                session.error_count += 1
+                session.last_error_time = time.time()
+                await asyncio.sleep(5)  # Wait before retrying
 
-        if new_messages:
-            for message in new_messages:
-                await context.bot.send_message(
-                    chat_id=session.chat_id,
-                    text=message
-                )
-            session.previous_messages = current_messages.copy()
-        else:
+    except Exception as e:
+        logging.error(f"Fatal error in monitor_channels: {e}")
+        session.is_monitoring = False
+        if session.chat_id:
             await context.bot.send_message(
                 chat_id=session.chat_id,
-                text="No new multiple-trader tokens found" + timing_message
+                text=f"Monitoring stopped due to error: {str(e)}"
             )
-
-        await asyncio.sleep(1)
-        if session.is_monitoring:
-            await context.bot.send_message(
-                chat_id=session.chat_id,
-                text=".....\n ROUND RESTARTED \n ....."
-            )
-        else:
-            final_duration = time.time() - session.start_time
-            await context.bot.send_message(
-                chat_id=session.chat_id,
-                text=f"Monitoring stopped. Total running time: {final_duration:.2f} seconds"
-            )
-            break
 
 async def start(update, context):
-    """Start the message monitoring process for a specific chat"""
+    """Start the message monitoring process"""
     if not await check_authorization(update):
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -286,6 +345,7 @@ async def start(update, context):
     session = context.bot_data[chat_id]
     
     if not session.is_monitoring:
+        await session.reset()  # Reset session state
         session.is_monitoring = True
         session.start_time = time.time()
         session.monitoring_task = asyncio.create_task(monitor_channels(context, session))
@@ -300,7 +360,7 @@ async def start(update, context):
         )
 
 async def stop(update, context):
-    """Stop the message monitoring process for a specific chat"""
+    """Stop the message monitoring process"""
     if not await check_authorization(update):
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
@@ -313,16 +373,8 @@ async def stop(update, context):
     if chat_id in context.bot_data:
         session = context.bot_data[chat_id]
         if session.is_monitoring:
-            session.is_monitoring = False
-            if session.monitoring_task:
-                session.monitoring_task.cancel()
+            await session.reset()
             final_duration = time.time() - session.start_time
-            session.multi_trader_tokens.clear()
-            session.previous_messages.clear()
-            session.token_pump_types.clear()
-            session.token_market_caps.clear()
-            session.token_sol_amounts.clear()
-            session.token_timestamps.clear()
             await context.bot.send_message(
                 chat_id=chat_id,
                 text=f"Monitoring stopped for this chat.\nTotal running time: {final_duration:.2f} seconds"
