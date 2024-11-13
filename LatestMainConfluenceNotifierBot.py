@@ -21,8 +21,7 @@ keep_alive()
 PORT = int(os.getenv("PORT", 8443))# Render will provide the PORT environment variable
 
 # Telegram bot configuration
-dotenv_path = find_dotenv()
-load_dotenv(dotenv_path)
+
 
 # Telethon client configuration
 BOT_TOKEN = os.getenv("BOT_TOKEN")
