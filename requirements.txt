@@ -1,5 +1,5 @@
-telethon==1.37.0
-telegram==0.0.1
+telethon
+telegram
 python-telegram-bot
 python-dotenv
 requests
