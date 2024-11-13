@@ -1,7 +1,7 @@
 import os
 import time
 from datetime import datetime
-from dotenv import find_dotenv, load_dotenv
+
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from telethon import TelegramClient
 import re
@@ -18,8 +18,7 @@ from keep_alive import keep_alive
 nest_asyncio.apply()
 
 keep_alive()
-
-PORT = 8443  # Render will provide the PORT environment variable
+PORT = int(os.getenv("PORT", 8443))# Render will provide the PORT environment variable
 
 # Telegram bot configuration
 dotenv_path = find_dotenv()
@@ -29,7 +28,7 @@ load_dotenv(dotenv_path)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
-PORT = int(os.getenv("PORT", 8443))
+
 
 # Create Telethon client
 telethon_client = TelegramClient('test', API_ID, API_HASH)
