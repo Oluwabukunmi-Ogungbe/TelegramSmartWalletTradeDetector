@@ -350,6 +350,7 @@ async def stop(update, context):
         )
 
 async def main():
+    telethon_client = TelegramClient('test', API_ID, API_HASH)
     await telethon_client.start()  # Add this line to start the Telethon client
     logging.info("Telethon client started")
     """Initialize the bot with webhook for Render deployment"""
