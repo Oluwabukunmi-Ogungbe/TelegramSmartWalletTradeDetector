@@ -24,9 +24,9 @@ PORT = int(os.getenv("PORT", 8443))# Render will provide the PORT environment va
 
 
 # Telethon client configuration
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH")
+BOT_TOKEN = "7327291802:AAFPM911VQH5uyTX2uPG8j503NCt3r62yMs"
+API_ID = 21202746
+API_HASH = "e700432294937e6925a83149ee7165a0"
 
 
 # Create Telethon client
