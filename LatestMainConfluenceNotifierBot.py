@@ -295,6 +295,16 @@ async def start(update, context):
     else:
         is_tracking_thetrackoors = True
 
+    # Ensure Telethon client is connected
+    if not telethon_client.is_connected():
+        await telethon_client.connect()
+        if not await telethon_client.is_user_authorized():
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="Error: Telethon client is not authorized. Please check your configuration."
+            )
+            return
+
     # Start monitoring session for THETRACKOORS group
     if chat_id in context.bot_data:
         session = context.bot_data[chat_id]
@@ -302,21 +312,44 @@ async def start(update, context):
         if not session.is_monitoring:
             session.is_monitoring = True
             session.start_time = time.time()
-            session.monitoring_task = asyncio.create_task(monitor_channels(context, session))
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text="Monitoring now started for THETRACKOORS."
-            )
+            try:
+                # Create and start the monitoring task
+                session.monitoring_task = asyncio.create_task(monitor_channels(context, session))
+                # Add task error handling
+                session.monitoring_task.add_done_callback(lambda t: handle_task_completion(t, context, chat_id))
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="Monitoring now started for THETRACKOORS."
+                )
+            except Exception as e:
+                session.is_monitoring = False
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"Error starting monitoring: {str(e)}"
+                )
     else:
         context.bot_data[chat_id] = MonitoringSession(chat_id)
         session = context.bot_data[chat_id]
         session.is_monitoring = True
         session.start_time = time.time()
-        session.monitoring_task = asyncio.create_task(monitor_channels(context, session))
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="Monitoring started for THETRACKOORS."
-        )
+        try:
+            # Create and start the monitoring task
+            session.monitoring_task = asyncio.create_task(monitor_channels(context, session))
+            # Add task error handling
+            session.monitoring_task.add_done_callback(lambda t: handle_task_completion(t, context, chat_id))
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="Monitoring started for THETRACKOORS."
+            )
+        except Exception as e:
+            session.is_monitoring = False
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"Error starting monitoring: {str(e)}"
+            )
+
+
+
 
 async def stop(update, context):
     """Stop the message monitoring process for the THETRACKOORS group"""
@@ -352,9 +385,12 @@ async def stop(update, context):
         )
 
 async def main():
+    """Initialize the bot with webhook for Render deployment"""
+    # Initialize and connect Telethon client first
+    await telethon_client.start()
     
     logging.info("Telethon client started")
-    """Initialize the bot with webhook for Render deployment"""
+    
     # Initialize Application instance
     application = Application.builder().token(BOT_TOKEN).build()
     application.bot_data["application"] = application
