@@ -13,11 +13,11 @@ from contextlib import suppress
 from httpx import Timeout
 import logging
 import nest_asyncio
-from keep_alive import keep_alive
+#from keep_alive import keep_alive
 
 nest_asyncio.apply()
 
-keep_alive()
+#keep_alive()
 PORT = int(os.getenv("PORT", 8080))# Render will provide the PORT environment variable
 
 # Telegram bot configuration
@@ -27,10 +27,18 @@ PORT = int(os.getenv("PORT", 8080))# Render will provide the PORT environment va
 BOT_TOKEN = "7327291802:AAFPM911VQH5uyTX2uPG8j503NCt3r62yMs"
 API_ID = 21202746
 API_HASH = "e700432294937e6925a83149ee7165a0"
+is_tracking_thetrackoors = False
+telethon_client = None
+
 
 
 # Create Telethon client
-telethon_client = TelegramClient('test', API_ID, API_HASH)
+async def initialize_telethon():
+    global telethon_client
+    telethon_client = TelegramClient('test', API_ID, API_HASH)
+    await telethon_client.start()
+    logging.info("Telethon client initialized and started")
+
 
 # Excluded token address
 EXCLUDED_TOKEN = 'So11111111111111111111111111111112'
@@ -282,74 +290,46 @@ async def monitor_channels(context, session):
 
 async def start(update, context):
     """Start the message monitoring process for the THETRACKOORS group"""
-    global is_tracking_thetrackoors
+    global is_tracking_thetrackoors, telethon_client
     chat_id = update.effective_chat.id
 
-    # Check if user is authorized and the chat is THETRACKOORS
+    # Initialize Telethon client if not already initialized
+    if telethon_client is None or not telethon_client.is_connected():
+        await initialize_telethon()
+
+    # Check authorization
     if not await check_authorization(update):
         await context.bot.send_message(
             chat_id=chat_id,
             text=f"You are not eligible to use the bot. Your username: {update.effective_user.username}"
         )
         return
-    else:
-        is_tracking_thetrackoors = True
 
-    # Ensure Telethon client is connected
-    if not telethon_client.is_connected():
-        await telethon_client.connect()
-        if not await telethon_client.is_user_authorized():
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text="Error: Telethon client is not authorized. Please check your configuration."
-            )
-            return
-
-    # Start monitoring session for THETRACKOORS group
+    is_tracking_thetrackoors = True
+    
+    # Start monitoring session
     if chat_id in context.bot_data:
         session = context.bot_data[chat_id]
-        
         if not session.is_monitoring:
             session.is_monitoring = True
             session.start_time = time.time()
-            try:
-                # Create and start the monitoring task
-                session.monitoring_task = asyncio.create_task(monitor_channels(context, session))
-                # Add task error handling
-                session.monitoring_task.add_done_callback(lambda t: handle_task_completion(t, context, chat_id))
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text="Monitoring now started for THETRACKOORS."
-                )
-            except Exception as e:
-                session.is_monitoring = False
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=f"Error starting monitoring: {str(e)}"
-                )
+            # Create and store the monitoring task
+            session.monitoring_task = asyncio.create_task(monitor_channels(context, session))
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="Monitoring now started for THETRACKOORS."
+            )
     else:
-        context.bot_data[chat_id] = MonitoringSession(chat_id)
-        session = context.bot_data[chat_id]
+        session = MonitoringSession(chat_id)
+        context.bot_data[chat_id] = session
         session.is_monitoring = True
         session.start_time = time.time()
-        try:
-            # Create and start the monitoring task
-            session.monitoring_task = asyncio.create_task(monitor_channels(context, session))
-            # Add task error handling
-            session.monitoring_task.add_done_callback(lambda t: handle_task_completion(t, context, chat_id))
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text="Monitoring started for THETRACKOORS."
-            )
-        except Exception as e:
-            session.is_monitoring = False
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=f"Error starting monitoring: {str(e)}"
-            )
-
-
-
+        # Create and store the monitoring task
+        session.monitoring_task = asyncio.create_task(monitor_channels(context, session))
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="Monitoring started for THETRACKOORS."
+        )
 
 async def stop(update, context):
     """Stop the message monitoring process for the THETRACKOORS group"""
@@ -385,12 +365,16 @@ async def stop(update, context):
         )
 
 async def main():
-    """Initialize the bot with webhook for Render deployment"""
-    # Initialize and connect Telethon client first
-    await telethon_client.start()
+    # Initialize logging
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
     
+    # Initialize Telethon client
+    await initialize_telethon()
     logging.info("Telethon client started")
-    
+
     # Initialize Application instance
     application = Application.builder().token(BOT_TOKEN).build()
     application.bot_data["application"] = application
@@ -399,10 +383,9 @@ async def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("stop", stop))
 
-    # Set up webhook using a placeholder external URL (adjust as necessary)
+    # Set up webhook
     webhook_url = f"https://{os.getenv('RENDER_SERVICE_NAME')}.onrender.com/{BOT_TOKEN}"
 
-    logging.info("Starting bot initialization...")
     try:
         await application.bot.set_webhook(
             url=webhook_url,
@@ -420,12 +403,6 @@ async def main():
 
 def run_bot():
     """Runner function for the bot"""
-    # Configure logging
-    logging.basicConfig(
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        level=logging.INFO
-    )
-
     try:
         # Initialize the event loop
         loop = asyncio.new_event_loop()
@@ -433,12 +410,12 @@ def run_bot():
         
         # Initialize the application
         application = loop.run_until_complete(main())
-        logging.info("webhookrun about to start")
+        logging.info("Webhook run about to start")
         
         # Run the webhook server
         application.run_webhook(
-            listen="0.0.0.0",  # Listen on all available interfaces
-            port=PORT,  # Use the PORT provided by Render
+            listen="0.0.0.0",
+            port=PORT,
             url_path=BOT_TOKEN,
             webhook_url=f"https://{os.getenv('RENDER_SERVICE_NAME')}.onrender.com/{BOT_TOKEN}",
             drop_pending_updates=True
@@ -449,7 +426,6 @@ def run_bot():
     except Exception as e:
         logging.error(f"Fatal error: {e}")
         raise
-    logging.info("webhook started")
 
 if __name__ == "__main__":
     run_bot()
