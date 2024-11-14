@@ -18,7 +18,7 @@ from keep_alive import keep_alive
 nest_asyncio.apply()
 
 keep_alive()
-PORT = int(os.getenv("PORT", 10000))# Render will provide the PORT environment variable
+PORT = int(os.getenv("PORT", 8080))# Render will provide the PORT environment variable
 
 # Telegram bot configuration
 
