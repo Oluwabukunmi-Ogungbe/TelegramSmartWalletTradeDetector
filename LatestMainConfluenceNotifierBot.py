@@ -303,7 +303,7 @@ async def start(update, context):
             session.monitoring_task = asyncio.create_task(monitor_channels(context, session))
             await context.bot.send_message(
                 chat_id=chat_id,
-                text="Monitoring started for THETRACKOORS."
+                text="Monitoring now started for THETRACKOORS."
             )
     else:
         context.bot_data[chat_id] = MonitoringSession(chat_id)
