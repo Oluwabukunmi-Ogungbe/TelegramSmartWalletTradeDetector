@@ -292,6 +292,8 @@ async def start(update, context):
             text=f"You are not eligible to use the bot. Your username: {update.effective_user.username}"
         )
         return
+    else:
+        is_tracking_thetrackoors = True
 
     # Start monitoring session for THETRACKOORS group
     if chat_id in context.bot_data:
